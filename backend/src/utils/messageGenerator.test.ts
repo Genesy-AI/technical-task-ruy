@@ -184,7 +184,42 @@ describe('generateMessageFromTemplate', () => {
     })
   })
 
+  describe('phone, years at company and LinkedIn fields', () => {
+    const contactLead: Lead = {
+      firstName: 'Ada',
+      phoneNumber: '+44 20 7946 0958',
+      yearsAtCompany: 3,
+      linkedinUrl: 'https://www.linkedin.com/in/ada',
+    }
+
+    it('should replace the new fields, formatting numbers as text', () => {
+      const template = 'Hi {firstName}, {yearsAtCompany} years in! Call {phoneNumber} or see {linkedinUrl}'
+      expect(generateMessageFromTemplate(template, contactLead)).toBe(
+        'Hi Ada, 3 years in! Call +44 20 7946 0958 or see https://www.linkedin.com/in/ada'
+      )
+    })
+
+    it('should accept 0 years at company as a value, not as missing', () => {
+      const result = generateMessageFromTemplate('{yearsAtCompany} years', {
+        ...contactLead,
+        yearsAtCompany: 0,
+      })
+      expect(result).toBe('0 years')
+    })
+
+    it('should throw when a new field is missing', () => {
+      expect(() =>
+        generateMessageFromTemplate('Call {phoneNumber}', { firstName: 'Ada', phoneNumber: null })
+      ).toThrow('Missing required field: phoneNumber')
+    })
+  })
+
   describe('special characters and encoding', () => {
+    it('should keep dollar sequences in field values literal', () => {
+      const result = generateMessageFromTemplate('Hi {firstName}', { firstName: 'Cash $& $1' })
+      expect(result).toBe('Hi Cash $& $1')
+    })
+
     it('should handle special characters in field values', () => {
       const specialLead: Lead = {
         firstName: 'José',

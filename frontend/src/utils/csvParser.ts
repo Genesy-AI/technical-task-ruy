@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import { parseLinkedinUrl, parseYearsAtCompany } from './leadFieldParsers'
 
 export interface CsvLead {
   firstName: string
@@ -7,6 +8,9 @@ export interface CsvLead {
   jobTitle?: string
   countryCode?: string
   companyName?: string
+  phoneNumber?: string
+  yearsAtCompany?: number
+  linkedinUrl?: string
   isValid: boolean
   errors: string[]
   rowIndex: number
@@ -49,6 +53,8 @@ export const parseCsv = (content: string): CsvLead[] => {
     if (Object.values(row).every((value) => !value)) return
 
     const lead: Partial<CsvLead> = { rowIndex: index + 2 }
+    let rawYearsAtCompany: string | undefined
+    let rawLinkedinUrl: string | undefined
 
     Object.entries(row).forEach(([header, value]) => {
       const normalizedHeader = header.toLowerCase().replace(/[^a-z]/g, '')
@@ -73,10 +79,42 @@ export const parseCsv = (content: string): CsvLead[] => {
         case 'companyname':
           lead.companyName = trimmedValue || undefined
           break
+        case 'phonenumber':
+        case 'phone':
+          lead.phoneNumber = trimmedValue || undefined
+          break
+        case 'yearsatcompany':
+        case 'yearsatcurrentcompany':
+        case 'yearsincompany':
+        // The sample CSVs in docs/ call this column "yearsInRole".
+        case 'yearsinrole':
+          rawYearsAtCompany = trimmedValue
+          break
+        case 'linkedinurl':
+        case 'linkedin':
+        case 'linkedinprofile':
+        case 'linkedinprofileurl':
+          rawLinkedinUrl = trimmedValue
+          break
       }
     })
 
     const errors: string[] = []
+
+    const yearsAtCompany = parseYearsAtCompany(rawYearsAtCompany)
+    if (yearsAtCompany.ok) {
+      lead.yearsAtCompany = yearsAtCompany.value ?? undefined
+    } else {
+      errors.push(yearsAtCompany.error)
+    }
+
+    const linkedinUrl = parseLinkedinUrl(rawLinkedinUrl)
+    if (linkedinUrl.ok) {
+      lead.linkedinUrl = linkedinUrl.value ?? undefined
+    } else {
+      errors.push(linkedinUrl.error)
+    }
+
     if (!lead.firstName?.trim()) {
       errors.push('First name is required')
     }

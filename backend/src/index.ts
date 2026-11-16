@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
+import { parseLinkedinUrl, parseOptionalText, parseYearsAtCompany } from './utils/leadFields'
 import { runTemporalWorker } from './worker'
 import { config } from './config'
 const prisma = new PrismaClient()
@@ -222,6 +223,14 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
 
     for (const lead of uniqueLeads) {
       try {
+        const yearsAtCompany = parseYearsAtCompany(lead.yearsAtCompany)
+        const linkedinUrl = parseLinkedinUrl(lead.linkedinUrl)
+        if (!yearsAtCompany.ok || !linkedinUrl.ok) {
+          const fieldErrors = [yearsAtCompany, linkedinUrl].flatMap((result) => (result.ok ? [] : [result.error]))
+          errors.push({ lead, error: fieldErrors.join('; ') })
+          continue
+        }
+
         await prisma.lead.create({
           data: {
             firstName: lead.firstName.trim(),
@@ -230,6 +239,9 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
             jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
             countryCode: lead.countryCode ? lead.countryCode.trim() : null,
             companyName: lead.companyName ? lead.companyName.trim() : null,
+            phoneNumber: parseOptionalText(lead.phoneNumber),
+            yearsAtCompany: yearsAtCompany.value,
+            linkedinUrl: linkedinUrl.value,
           },
         })
         importedCount++
