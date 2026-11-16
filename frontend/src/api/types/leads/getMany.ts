@@ -1,3 +1,5 @@
+import { PhoneEnrichmentStatus, PhoneProviderId } from './enrichPhone'
+
 export type LeadsGetManyInput = undefined
 
 export type LeadsGetManyOutput = {
@@ -12,4 +14,7 @@ export type LeadsGetManyOutput = {
   companyName: string | null
   message: string | null
   emailVerified: boolean | null
+  phone: string | null
+  phoneEnrichmentStatus: PhoneEnrichmentStatus | null
+  phoneEnrichmentProvider: PhoneProviderId | null
 }[]
