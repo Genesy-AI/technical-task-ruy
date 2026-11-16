@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCsv, isValidEmail } from './csvParser'
+import { parseCsv, isValidEmail, markRejectedLeads } from './csvParser'
 
 describe('isValidEmail', () => {
   it('should return true for valid email addresses', () => {
@@ -154,6 +154,33 @@ John,Doe,john@example.com,,`
     expect(result[0].isValid).toBe(true)
   })
 
+  it('should normalize valid country codes ignoring case and spaces', () => {
+    const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com, es
+Jane,Smith,jane@example.com,Us`
+
+    const result = parseCsv(csv)
+
+    expect(result.map((lead) => lead.countryCode)).toEqual(['ES', 'US'])
+    expect(result.every((lead) => lead.isValid)).toBe(true)
+  })
+
+  it.each(['XXX', '12', 'UK', 'Spain'])(
+    'should mark the row invalid when countryCode is %s',
+    (countryCode) => {
+      const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com,${countryCode}`
+
+      const result = parseCsv(csv)
+
+      expect(result[0].isValid).toBe(false)
+      expect(result[0].countryCode).toBe(countryCode)
+      expect(result[0].errors).toEqual([
+        `Invalid country code "${countryCode}": must be an ISO 3166-1 alpha-2 code`,
+      ])
+    }
+  )
+
   it('should preserve row index correctly', () => {
     const csv = `firstName,lastName,email
 John,Doe,john@example.com
@@ -222,5 +249,32 @@ Jane,Johnson,jane@example.com`
     expect(result[0].lastName).toBe('Doe')
     expect(result[0].email).toBe('john@example.com')
     expect(result[0].isValid).toBe(true)
+  })
+})
+
+describe('markRejectedLeads', () => {
+  const sentLeads = parseCsv(`firstName,lastName,email,countryCode
+John,Doe,john@example.com,ES
+Jane,Smith,jane@example.com,US
+Jim,Beam,jim@example.com,FR`)
+
+  it('should return only the rejected leads, marked invalid with the backend errors', () => {
+    const result = markRejectedLeads(sentLeads, [{ index: 1, errors: ['Invalid country code "US"'] }])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      firstName: 'Jane',
+      rowIndex: 3,
+      isValid: false,
+      errors: ['Invalid country code "US"'],
+    })
+  })
+
+  it('should return an empty list when nothing was rejected', () => {
+    expect(markRejectedLeads(sentLeads, [])).toEqual([])
+  })
+
+  it('should ignore indexes that do not match a sent lead', () => {
+    expect(markRejectedLeads(sentLeads, [{ index: 7, errors: ['x'] }])).toEqual([])
   })
 })

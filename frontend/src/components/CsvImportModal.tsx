@@ -2,8 +2,10 @@ import { FC, useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
+import { isAxiosError } from 'axios'
 import { api } from '../api'
-import { CsvLead, parseCsv } from '../utils/csvParser'
+import { LeadsBulkImportOutput } from '../api/types/leads/bulkImport'
+import { CsvLead, markRejectedLeads, parseCsv } from '../utils/csvParser'
 
 interface CsvImportModalProps {
   isOpen: boolean
@@ -89,10 +91,15 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
     setIsDragging(false)
   }, [])
 
-  const importMutation = useMutation({
-    mutationFn: async (leads: CsvLead[]) => {
-      const validLeads = leads.filter((lead) => lead.isValid)
+  // Keeps in the preview the rows the backend rejected plus the ones never sent (invalid on the client).
+  const showRejectedLeads = (rejectedLeads: CsvLead[]) => {
+    const notSent = csvData.filter((lead) => !lead.isValid)
+    setCsvData([...rejectedLeads, ...notSent].sort((a, b) => a.rowIndex - b.rowIndex))
+  }
 
+  const importMutation = useMutation({
+    // Receives only the leads that passed client-side validation, in the order they are sent.
+    mutationFn: async (validLeads: CsvLead[]) => {
       const leadsToImport = validLeads.map((lead) => ({
         firstName: lead.firstName,
         lastName: lead.lastName,
@@ -104,22 +111,37 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
 
       return api.leads.bulkImport({ leads: leadsToImport })
     },
-    onSuccess: (data) => {
+    onSuccess: (data, sentLeads) => {
       queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
 
       let message = `Successfully imported ${data.importedCount} leads!`
       if (data.duplicatesSkipped > 0) {
         message += ` (${data.duplicatesSkipped} duplicates skipped)`
       }
-      if (data.invalidLeads > 0) {
-        message += ` (${data.invalidLeads} invalid leads excluded)`
-      }
 
       toast.success(message)
+
+      const rejectedLeads = markRejectedLeads(sentLeads, data.validationErrors ?? [])
+      if (rejectedLeads.length > 0) {
+        toast.error(`${rejectedLeads.length} leads were rejected. Review the errors in the list.`)
+        showRejectedLeads(rejectedLeads)
+        return
+      }
+
       onClose()
       setCsvData([])
     },
-    onError: () => {
+    onError: (error, sentLeads) => {
+      const validationErrors = isAxiosError<Partial<LeadsBulkImportOutput>>(error)
+        ? error.response?.data?.validationErrors
+        : undefined
+      const rejectedLeads = markRejectedLeads(sentLeads, validationErrors ?? [])
+      if (rejectedLeads.length > 0) {
+        toast.error('No leads were imported. Review the errors in the list.')
+        showRejectedLeads(rejectedLeads)
+        return
+      }
+
       toast.error('Error importing leads. Please try again.')
     },
   })
@@ -129,7 +151,7 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
       toast.error('No valid leads to import')
       return
     }
-    importMutation.mutate(csvData)
+    importMutation.mutate(csvData.filter((lead) => lead.isValid))
   }
 
   const handleClose = useCallback(() => {
@@ -285,6 +307,9 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
                         Company
                       </th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Country
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                         Errors
                       </th>
                     </tr>
@@ -309,6 +334,7 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-900">{lead.email || '-'}</td>
                         <td className="px-3 py-2 text-sm text-gray-900">{lead.companyName || '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900">{lead.countryCode || '-'}</td>
                         <td className="px-3 py-2 text-sm text-red-600">{lead.errors.join(', ') || '-'}</td>
                       </tr>
                     ))}
