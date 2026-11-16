@@ -95,6 +95,52 @@ cd frontend
 pnpm run dev           # Starts the dev server
 ```
 
+### Ports and running several instances
+
+Defaults: frontend on `5173`, backend API on `4000`, Temporal on `localhost:7233` (namespace
+`default`, task queue `myQueue`). To change them, copy `.env.example` to `.env` in the repo root
+(the file is git-ignored and read by both the backend and the frontend; shell variables win over
+it):
+
+```zsh
+cp .env.example .env
+```
+
+| Variable | Default | Used by |
+|---|---|---|
+| `FRONTEND_PORT` | `5173` | Vite dev server and `vite preview` |
+| `BACKEND_PORT` | `4000` | Express API; the frontend calls `http://localhost:$BACKEND_PORT` |
+| `VITE_API_URL` | derived from `BACKEND_PORT` | Optional full API URL override for the frontend |
+| `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal client and worker |
+| `TEMPORAL_NAMESPACE` | `default` | Temporal client and worker |
+| `TEMPORAL_TASK_QUEUE` | `myQueue` | Temporal client and worker |
+
+On startup both sides print the ports they use. If a port is already taken, the process stops
+with a message naming the variable to change instead of silently moving to another port.
+
+**Several instances side by side (e.g. one per git worktree).** Run a single
+`temporal server start-dev` for all of them and give each instance its own ports and its own
+Temporal namespace, so a worker from one worktree never picks up another worktree's workflows
+(each instance has its own SQLite database, so a foreign workflow would write to the wrong one).
+For a second instance:
+
+```zsh
+# repo-root .env of the second worktree
+FRONTEND_PORT=5174
+BACKEND_PORT=4001
+TEMPORAL_NAMESPACE=instance-2
+```
+
+Create the namespace once, then start the backend and frontend as usual:
+
+```zsh
+temporal operator namespace create --namespace instance-2
+```
+
+(Or create it when starting the server: `temporal server start-dev -n instance-2`. Without
+`--db-filename` the dev server keeps namespaces in memory, so recreate them after a restart.) The Temporal
+Web UI stays at http://localhost:8233; pick the namespace from its selector.
+
 ## Task Description
 
 ### Bug: CSV country codes
