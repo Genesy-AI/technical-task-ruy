@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import { checkCountryCode } from '../../../shared/countryCodes'
 
 export interface CsvLead {
   firstName: string
@@ -88,6 +89,12 @@ export const parseCsv = (content: string): CsvLead[] => {
     } else if (!isValidEmail(lead.email)) {
       errors.push('Invalid email format')
     }
+    const country = checkCountryCode(lead.countryCode)
+    if (country.valid) {
+      lead.countryCode = country.value ?? undefined
+    } else {
+      errors.push(country.error)
+    }
 
     data.push({
       ...lead,
@@ -101,3 +108,15 @@ export const parseCsv = (content: string): CsvLead[] => {
 
   return data
 }
+
+/**
+ * Returns the sent leads the backend rejected, marked invalid with the backend's errors.
+ * `validationErrors[].index` is the position of the lead in `sentLeads`.
+ */
+export const markRejectedLeads = (
+  sentLeads: CsvLead[],
+  validationErrors: Array<{ index: number; errors: string[] }>
+): CsvLead[] =>
+  validationErrors
+    .filter(({ index }) => sentLeads[index] !== undefined)
+    .map(({ index, errors }) => ({ ...sentLeads[index], isValid: false, errors }))

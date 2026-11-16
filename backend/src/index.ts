@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
+import { validateBulkLead, ValidatedLead } from './utils/leadValidation'
 import { runTemporalWorker } from './worker'
 import { config } from './config'
 const prisma = new PrismaClient()
@@ -180,30 +181,26 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
   }
 
   try {
-    const validLeads = leads.filter((lead) => {
-      return (
-        lead.firstName &&
-        lead.lastName &&
-        lead.email &&
-        typeof lead.firstName === 'string' &&
-        lead.firstName.trim() &&
-        typeof lead.lastName === 'string' &&
-        lead.lastName.trim() &&
-        typeof lead.email === 'string' &&
-        lead.email.trim()
-      )
+    const validLeads: ValidatedLead[] = []
+    const validationErrors: Array<{ index: number; errors: string[] }> = []
+
+    leads.forEach((lead, index) => {
+      const result = validateBulkLead(lead)
+      if (result.valid) {
+        validLeads.push(result.lead)
+      } else {
+        validationErrors.push({ index, errors: result.errors })
+      }
     })
 
     if (validLeads.length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'No valid leads found. firstName, lastName, and email are required.' })
+      return res.status(400).json({ error: 'No valid leads found.', validationErrors })
     }
 
     const existingLeads = await prisma.lead.findMany({
       where: {
         OR: validLeads.map((lead) => ({
-          AND: [{ firstName: lead.firstName.trim() }, { lastName: lead.lastName.trim() }],
+          AND: [{ firstName: lead.firstName }, { lastName: lead.lastName }],
         })),
       },
     })
@@ -222,16 +219,7 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
 
     for (const lead of uniqueLeads) {
       try {
-        await prisma.lead.create({
-          data: {
-            firstName: lead.firstName.trim(),
-            lastName: lead.lastName.trim(),
-            email: lead.email.trim(),
-            jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
-            countryCode: lead.countryCode ? lead.countryCode.trim() : null,
-            companyName: lead.companyName ? lead.companyName.trim() : null,
-          },
-        })
+        await prisma.lead.create({ data: lead })
         importedCount++
       } catch (error) {
         errors.push({
@@ -246,6 +234,7 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
       importedCount,
       duplicatesSkipped: validLeads.length - uniqueLeads.length,
       invalidLeads: leads.length - validLeads.length,
+      validationErrors,
       errors,
     })
   } catch (error) {

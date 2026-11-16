@@ -77,7 +77,12 @@ export default defineConfig(async ({ command, mode }) => {
 
   return {
     plugins: [react(), tailwindcss(), printInstancePorts(frontendPort, apiUrl)],
-    server: { port: frontendPort, strictPort: true },
+    server: {
+      port: frontendPort,
+      strictPort: true,
+      // Allow the dev server to serve the code shared with the backend (../shared).
+      fs: { allow: ['.', '../shared'] },
+    },
     preview: { port: frontendPort, strictPort: true },
     define: {
       'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl),

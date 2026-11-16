@@ -9,11 +9,18 @@ export interface LeadsBulkImportInput {
   }[]
 }
 
+/** A lead the backend rejected; `index` is its position in the request's `leads` array. */
+export interface LeadsBulkImportValidationError {
+  index: number
+  errors: string[]
+}
+
 export interface LeadsBulkImportOutput {
   success: boolean
   importedCount: number
   duplicatesSkipped: number
   invalidLeads: number
+  validationErrors: LeadsBulkImportValidationError[]
   errors: Array<{
     lead: any
     error: string

@@ -1,11 +1,13 @@
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { parseEnv } from 'util'
+import { findRepoRoot } from './utils/findRepoRoot'
 
 // Instance settings live in the repo-root `.env` (one per worktree), shared with the frontend.
 // Variables already set in the shell win over the file.
-const rootEnvFile = resolve(__dirname, '../../.env')
-if (existsSync(rootEnvFile)) {
+const repoRoot = findRepoRoot(__dirname)
+const rootEnvFile = repoRoot ? resolve(repoRoot, '.env') : undefined
+if (rootEnvFile && existsSync(rootEnvFile)) {
   const parsed = parseEnv(readFileSync(rootEnvFile, 'utf8'))
   for (const [key, value] of Object.entries(parsed)) {
     if (process.env[key] === undefined) process.env[key] = value
