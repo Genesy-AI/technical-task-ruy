@@ -4,6 +4,7 @@ import { Connection, Client } from '@temporalio/client'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { runTemporalWorker } from './worker'
+import { config } from './config'
 const prisma = new PrismaClient()
 const app = express()
 app.use(express.json())
@@ -273,8 +274,8 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'No leads found with the provided IDs' })
     }
 
-    const connection = await Connection.connect({ address: 'localhost:7233' })
-    const client = new Client({ connection, namespace: 'default' })
+    const connection = await Connection.connect({ address: config.temporal.address })
+    const client = new Client({ connection, namespace: config.temporal.namespace })
 
     let verifiedCount = 0
     const results: Array<{ leadId: number; emailVerified: boolean }> = []
@@ -283,7 +284,7 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
     for (const lead of leads) {
       try {
         const isVerified = await client.workflow.execute(verifyEmailWorkflow, {
-          taskQueue: 'myQueue',
+          taskQueue: config.temporal.taskQueue,
           workflowId: `verify-email-${lead.id}-${Date.now()}`,
           args: [lead.email],
         })
@@ -313,11 +314,26 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
   }
 })
 
-app.listen(4000, () => {
-  console.log('Express server is running on port 4000')
-})
+// Express 5 passes listen errors (e.g. EADDRINUSE) to this callback.
+app.listen(config.backendPort, (err?: NodeJS.ErrnoException) => {
+  if (err) {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `Port ${config.backendPort} is already in use. Set BACKEND_PORT in the repo-root .env to a free port (see .env.example).`,
+      )
+    } else {
+      console.error(err)
+    }
+    process.exit(1)
+  }
 
-runTemporalWorker().catch((err) => {
-  console.error(err)
-  process.exit(1)
+  const { address, namespace, taskQueue } = config.temporal
+  console.log(`Backend API:  http://localhost:${config.backendPort}`)
+  console.log(`Frontend:     http://localhost:${config.frontendPort} (served by the frontend dev server)`)
+  console.log(`Temporal:     ${address} (namespace "${namespace}", task queue "${taskQueue}")`)
+
+  runTemporalWorker().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
 })
