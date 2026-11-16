@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FC, useState } from 'react'
+import { FC, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { api } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
@@ -17,7 +17,11 @@ export const LeadsList: FC = () => {
     queryFn: async () => api.leads.getMany(),
     retry: false,
   })
-  
+
+  const selectedLeadsData = useMemo(
+    () => leads.data?.filter((lead) => selectedLeads.includes(lead.id)) ?? [],
+    [leads.data, selectedLeads]
+  )
 
   const deleteLeadsMutation = useMutation({
     mutationFn: async (ids: number[]) => api.leads.deleteMany({ ids }),
@@ -79,6 +83,15 @@ export const LeadsList: FC = () => {
       month: 'short',
       day: 'numeric'
     })
+  }
+
+  // Shows "in/ada-lovelace" instead of the full URL to keep the column narrow.
+  const formatLinkedinUrl = (url: string) => {
+    try {
+      return new URL(url).pathname.replace(/^\/|\/$/g, '') || url
+    } catch {
+      return url
+    }
   }
 
   if (leads.isLoading) {
@@ -226,10 +239,19 @@ export const LeadsList: FC = () => {
                   Email
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  Phone
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  LinkedIn
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Job Title
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Company
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  Years at Company
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Country
@@ -267,10 +289,41 @@ export const LeadsList: FC = () => {
                     <div className="text-sm text-gray-900">{lead.email || '-'} {lead.emailVerified === null ? '❓' : lead.emailVerified ? '✅' : '❌'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {lead.phoneNumber ? (
+                        <a href={`tel:${lead.phoneNumber}`} className="hover:text-blue-600 hover:underline">
+                          {lead.phoneNumber}
+                        </a>
+                      ) : (
+                        '-'
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {lead.linkedinUrl ? (
+                        <a
+                          href={lead.linkedinUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={lead.linkedinUrl}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {formatLinkedinUrl(lead.linkedinUrl)}
+                        </a>
+                      ) : (
+                        '-'
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.jobTitle || '-'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.companyName || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{lead.yearsAtCompany ?? '-'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.countryCode || '-'}</div>
@@ -323,6 +376,7 @@ export const LeadsList: FC = () => {
         onClose={() => setIsMessageModalOpen(false)}
         selectedLeadIds={selectedLeads}
         selectedLeadsCount={selectedLeads.length}
+        selectedLeads={selectedLeadsData}
       />
 
       <CsvImportModal

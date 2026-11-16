@@ -1,14 +1,25 @@
-import { FC, useState, useEffect, useCallback, useRef } from 'react'
+import { FC, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import {
+  Lead,
+  TemplateField,
+  extractTemplateFields,
+  getFieldValue,
+  getTemplateField,
+  renderTemplatePreview,
+} from '../leadFields'
+import { TemplateFieldPicker } from './TemplateFieldPicker'
 
 interface MessageTemplateModalProps {
   isOpen: boolean
   onClose: () => void
   selectedLeadIds: number[]
   selectedLeadsCount: number
+  /** Selected leads' data, used for the field coverage counts and the preview. */
+  selectedLeads: Lead[]
 }
 
 export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
@@ -16,8 +27,13 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
   onClose,
   selectedLeadIds,
   selectedLeadsCount,
+  selectedLeads,
 }) => {
   const [template, setTemplate] = useState('')
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  // Set when the picker was opened by typing "{": the inserted field replaces that brace.
+  const [braceTrigger, setBraceTrigger] = useState<number | null>(null)
+  const [previewIndex, setPreviewIndex] = useState(0)
   const [generationResult, setGenerationResult] = useState<{
     success: boolean
     generatedCount: number
@@ -38,9 +54,7 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
             ? `Successfully generated message for ${result.generatedCount} lead`
             : `Successfully generated messages for ${result.generatedCount} leads`
         toast.success(message)
-        onClose()
-        setTemplate('')
-        setGenerationResult(null)
+        resetAndClose()
       } else {
         const successMessage =
           result.generatedCount === 1
@@ -70,13 +84,20 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
     }
   }
 
+  const resetAndClose = useCallback(() => {
+    onClose()
+    setTemplate('')
+    setGenerationResult(null)
+    setIsPickerOpen(false)
+    setBraceTrigger(null)
+    setPreviewIndex(0)
+  }, [onClose])
+
   const handleClose = useCallback(() => {
     if (!generateMessagesMutation.isPending) {
-      onClose()
-      setTemplate('')
-      setGenerationResult(null)
+      resetAndClose()
     }
-  }, [generateMessagesMutation.isPending, onClose])
+  }, [generateMessagesMutation.isPending, resetAndClose])
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
@@ -106,22 +127,60 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
     }
   }, [isOpen, handleClose])
 
-  const availableFields = ['firstName', 'lastName', 'email', 'jobTitle', 'companyName', 'countryCode']
+  const insertField = (field: TemplateField) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
 
-  const insertField = (field: string) => {
-    if (textareaRef.current) {
-      const textarea = textareaRef.current
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newTemplate = template.substring(0, start) + `{${field}}` + template.substring(end)
-      setTemplate(newTemplate)
+    const token = `{${field.key}}`
+    // Typing "{" opened the picker: replace that brace instead of adding a second one.
+    const start = braceTrigger ?? textarea.selectionStart
+    const end = braceTrigger !== null ? braceTrigger + 1 : textarea.selectionEnd
+    setTemplate(template.substring(0, start) + token + template.substring(end))
+    setIsPickerOpen(false)
+    setBraceTrigger(null)
 
-      setTimeout(() => {
-        textarea.focus()
-        textarea.setSelectionRange(start + field.length + 2, start + field.length + 2)
-      }, 0)
+    setTimeout(() => {
+      textarea.focus()
+      textarea.setSelectionRange(start + token.length, start + token.length)
+    }, 0)
+  }
+
+  const closePicker = () => {
+    setIsPickerOpen(false)
+    setBraceTrigger(null)
+    textareaRef.current?.focus()
+  }
+
+  const handleTemplateChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    const caret = e.target.selectionStart
+    setTemplate(value)
+    // Typing a single "{" opens the field picker, like an @-mention.
+    if (value.length === template.length + 1 && value[caret - 1] === '{') {
+      setBraceTrigger(caret - 1)
+      setIsPickerOpen(true)
     }
   }
+
+  // For each placeholder in the template: is it a known field, and how many selected leads lack it.
+  const usedFields = useMemo(
+    () =>
+      extractTemplateFields(template).map((key) => {
+        const field = getTemplateField(key)
+        const missing = field
+          ? selectedLeads.filter((lead) => getFieldValue(lead, field.key) === null).length
+          : 0
+        return { key, field, missing }
+      }),
+    [template, selectedLeads]
+  )
+  const unknownFields = usedFields.filter((used) => !used.field)
+  const leadsMissingData = selectedLeads.filter((lead) =>
+    usedFields.some((used) => used.field && getFieldValue(lead, used.field.key) === null)
+  ).length
+
+  const previewPosition = Math.min(previewIndex, selectedLeads.length - 1)
+  const previewLead = selectedLeads[previewPosition]
 
   if (!isOpen) return null
 
@@ -156,24 +215,31 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 Message Template
               </label>
               <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Insert field:</span>
-                  {availableFields.map((field) => (
-                    <button
-                      key={field}
-                      type="button"
-                      onClick={() => insertField(field)}
-                      className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition-colors"
-                    >
-                      {`{${field}}`}
-                    </button>
-                  ))}
+                <div className="relative">
+                  <button
+                    type="button"
+                    // Keep focus in the picker so its blur handler does not close it before this click toggles it.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setBraceTrigger(null)
+                      setIsPickerOpen((open) => !open)
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition-colors"
+                  >
+                    <span aria-hidden>+</span> Insert field
+                  </button>
+                  <span className="ml-2 text-xs text-gray-500">
+                    or type <code>{'{'}</code> in the message
+                  </span>
+                  {isPickerOpen && (
+                    <TemplateFieldPicker leads={selectedLeads} onSelect={insertField} onClose={closePicker} />
+                  )}
                 </div>
                 <textarea
                   ref={textareaRef}
                   id="message-template"
                   value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
+                  onChange={handleTemplateChange}
                   placeholder="Enter your message template here. Use {fieldName} to insert dynamic values.&#10;&#10;Example: Hi {firstName}, I noticed you work at {companyName} as a {jobTitle}. Would you be interested in..."
                   className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
                   required
@@ -184,7 +250,73 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 field is missing for a lead, an error will be shown and no message will be generated for that
                 lead.
               </p>
+
+              {usedFields.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2" aria-label="Fields used in this template">
+                  {usedFields.map(({ key, field, missing }) => (
+                    <span
+                      key={key}
+                      className={`px-2 py-0.5 text-xs rounded ${
+                        !field
+                          ? 'bg-red-100 text-red-800'
+                          : missing > 0
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-green-100 text-green-800'
+                      }`}
+                    >
+                      {field ? field.label : `{${key}}`}
+                      {!field ? ' · unknown field' : missing > 0 ? ` · missing for ${missing}` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {(unknownFields.length > 0 || leadsMissingData > 0) && (
+                <p className="mt-2 text-sm text-amber-700">
+                  {unknownFields.length > 0
+                    ? 'Unknown fields make generation fail for every lead.'
+                    : `${leadsMissingData} of ${selectedLeads.length} selected lead${selectedLeads.length !== 1 ? 's' : ''} will get no message because of missing data.`}
+                </p>
+              )}
             </div>
+
+            {template.trim() && previewLead && (
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                  <span>
+                    Preview for{' '}
+                    <span className="font-medium text-gray-700">
+                      {previewLead.firstName} {previewLead.lastName || ''}
+                    </span>
+                  </span>
+                  {selectedLeads.length > 1 && (
+                    <span className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label="Previous lead"
+                        onClick={() =>
+                          setPreviewIndex((previewPosition - 1 + selectedLeads.length) % selectedLeads.length)
+                        }
+                        className="px-1 hover:text-gray-800"
+                      >
+                        &lsaquo;
+                      </button>
+                      {previewPosition + 1} / {selectedLeads.length}
+                      <button
+                        type="button"
+                        aria-label="Next lead"
+                        onClick={() => setPreviewIndex((previewPosition + 1) % selectedLeads.length)}
+                        className="px-1 hover:text-gray-800"
+                      >
+                        &rsaquo;
+                      </button>
+                    </span>
+                  )}
+                </div>
+                <p className="whitespace-pre-wrap text-sm text-gray-900">
+                  {renderTemplatePreview(template, previewLead)}
+                </p>
+              </div>
+            )}
 
             {generationResult && (
               <div className="space-y-4">
