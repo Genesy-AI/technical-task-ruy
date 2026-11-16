@@ -1,5 +1,6 @@
 import Papa from 'papaparse'
 import { checkCountryCode } from '../../../shared/countryCodes'
+import { LeadsBulkImportValidationError } from '../api/types/leads/bulkImport'
 
 export interface CsvLead {
   firstName: string
@@ -115,7 +116,7 @@ export const parseCsv = (content: string): CsvLead[] => {
  */
 export const markRejectedLeads = (
   sentLeads: CsvLead[],
-  validationErrors: Array<{ index: number; errors: string[] }>
+  validationErrors: LeadsBulkImportValidationError[]
 ): CsvLead[] =>
   validationErrors
     .filter(({ index }) => sentLeads[index] !== undefined)

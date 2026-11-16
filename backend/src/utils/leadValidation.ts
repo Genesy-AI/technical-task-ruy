@@ -39,6 +39,7 @@ export const validateBulkLead = (input: unknown): LeadValidationResult => {
   const country = checkCountryCode(raw.countryCode)
   if (!country.valid) errors.push(country.error)
 
+  // `!country.valid` is already covered by `errors`; it is repeated so TypeScript narrows `country`.
   if (errors.length > 0 || !country.valid) {
     return { valid: false, errors }
   }

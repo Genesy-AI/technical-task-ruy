@@ -91,6 +91,12 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
     setIsDragging(false)
   }, [])
 
+  // Keeps in the preview the rows the backend rejected plus the ones never sent (invalid on the client).
+  const showRejectedLeads = (rejectedLeads: CsvLead[]) => {
+    const notSent = csvData.filter((lead) => !lead.isValid)
+    setCsvData([...rejectedLeads, ...notSent].sort((a, b) => a.rowIndex - b.rowIndex))
+  }
+
   const importMutation = useMutation({
     // Receives only the leads that passed client-side validation, in the order they are sent.
     mutationFn: async (validLeads: CsvLead[]) => {
@@ -113,15 +119,15 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
         message += ` (${data.duplicatesSkipped} duplicates skipped)`
       }
 
+      toast.success(message)
+
       const rejectedLeads = markRejectedLeads(sentLeads, data.validationErrors ?? [])
       if (rejectedLeads.length > 0) {
-        toast.success(message)
         toast.error(`${rejectedLeads.length} leads were rejected. Review the errors in the list.`)
-        setCsvData(rejectedLeads)
+        showRejectedLeads(rejectedLeads)
         return
       }
 
-      toast.success(message)
       onClose()
       setCsvData([])
     },
@@ -132,7 +138,7 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
       const rejectedLeads = markRejectedLeads(sentLeads, validationErrors ?? [])
       if (rejectedLeads.length > 0) {
         toast.error('No leads were imported. Review the errors in the list.')
-        setCsvData(rejectedLeads)
+        showRejectedLeads(rejectedLeads)
         return
       }
 
