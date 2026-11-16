@@ -5,6 +5,7 @@ import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { runTemporalWorker } from './worker'
 import { config } from './config'
+import { startPhoneEnrichment } from './enrichment/phone/start'
 const prisma = new PrismaClient()
 const app = express()
 app.use(express.json())
@@ -311,6 +312,32 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error verifying emails:', error)
     res.status(500).json({ error: 'Failed to verify emails' })
+  }
+})
+
+app.post('/leads/enrich-phone', async (req: Request, res: Response) => {
+  const { leadIds } = (req.body ?? {}) as { leadIds?: unknown }
+
+  if (!Array.isArray(leadIds) || leadIds.length === 0 || !leadIds.every((id) => typeof id === 'number' && Number.isInteger(id))) {
+    return res.status(400).json({ error: 'leadIds must be a non-empty array of lead ids' })
+  }
+
+  let connection: Connection | undefined
+  try {
+    connection = await Connection.connect({ address: config.temporal.address })
+    const client = new Client({ connection, namespace: config.temporal.namespace })
+    const result = await startPhoneEnrichment(
+      prisma,
+      client,
+      config.temporal.taskQueue,
+      [...new Set(leadIds as number[])],
+    )
+    res.json({ success: true, ...result })
+  } catch (error) {
+    console.error('Error starting phone enrichment:', error)
+    res.status(500).json({ error: 'Failed to start phone enrichment' })
+  } finally {
+    await connection?.close()
   }
 })
 

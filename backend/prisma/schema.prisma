@@ -19,4 +19,9 @@ model lead {
   companyName String?
   message     String?
   emailVerified Boolean?
+  phone       String?
+  // Phone enrichment state: queued | searching | found | not_found | failed (null = never run).
+  phoneEnrichmentStatus   String?
+  // Provider being queried while searching, or the one that found the phone.
+  phoneEnrichmentProvider String?
 }
